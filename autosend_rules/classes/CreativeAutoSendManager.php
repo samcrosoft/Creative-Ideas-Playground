@@ -13,6 +13,7 @@ use Faker\Generator;
 use Illuminate\Support\Collection;
 use Samcrosoft\CreativeAutoSend\Corpus\SessionCorpus;
 use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
+use Ubench;
 
 /**
  * Class CreativeAutoSendManager
@@ -31,6 +32,11 @@ class CreativeAutoSendManager
     private $oExpression;
 
     /**
+     * @var null|Ubench
+     */
+    private $oUBench = null;
+
+    /**
      * CreativeAutoSendManager constructor.
      */
     public function __construct()
@@ -39,6 +45,8 @@ class CreativeAutoSendManager
 
         // set the expression language
         $this->setExpressionManager();
+
+        $this->setUBench(new Ubench());
 
     }
 
@@ -100,27 +108,71 @@ class CreativeAutoSendManager
                 'session' => $oCorpus
             ]);
 
-        $mEvaluationResult = $bCastToBool ? (bool) $mEvaluationResult : $mEvaluationResult;
+        $mEvaluationResult = $bCastToBool ? (bool)$mEvaluationResult : $mEvaluationResult;
         return $mEvaluationResult;
     }
 
 
-    public function parseFilterRequirements(array $aRequirement, $iCorpusNumber = 20)
+    public function parseFilterRequirements(array $aRequirement, $iCorpusNumber = 20, $bIncludeBenchmark = false)
     {
-        $aCorpus = $this->getCorpusList($iCorpusNumber);
-        #$aCorpusBackup = $aCorpus;
+        $oBench = $this->getUBench();
 
-        collect($aRequirement)->each(function($sRule) use(&$aCorpus) {
-            $aCorpus = $aCorpus->filter(function($oCurrentCorpus) use($sRule) {
+        /*
+         * start benchmark
+         */
+        $oBench->start();
+
+        /*
+         * load the corpus
+         */
+        $aCorpus = $this->getCorpusList($iCorpusNumber);
+
+        collect($aRequirement)->each(function ($sRule) use (&$aCorpus) {
+            $aCorpus = $aCorpus->filter(function ($oCurrentCorpus) use ($sRule) {
                 $bResult = $this->evaluateRule($sRule, $oCurrentCorpus);
                 return $bResult;
             });
-
-            #echo $aCorpus->toJson();
-            #dd();
         });
 
-        return $aCorpus;
+        /*
+         * end benchmark
+         */
+        $oBench->end();
+
+        $oReturnCollect = collect();
+        $oReturnCollect->put("data", [
+            'corpusCount' => $iCorpusNumber,
+            'resultCount' => $aCorpus->count(),
+            'result' => $aCorpus
+        ]);
+
+        if ($bIncludeBenchmark) {
+            $oReturnCollect->put("benchmark", [
+                'time' => $oBench->getTime(),
+                'memory' => [
+                    'peak' => $oBench->getMemoryPeak(),
+                    'usage' => $oBench->getMemoryUsage()
+                ]
+            ]);
+        }
+
+        return $oReturnCollect;
+    }
+
+    /**
+     * @return null|Ubench
+     */
+    public function getUBench()
+    {
+        return $this->oUBench;
+    }
+
+    /**
+     * @param null|Ubench $oUBench
+     */
+    public function setUBench($oUBench)
+    {
+        $this->oUBench = $oUBench;
     }
 
 }
